@@ -1,28 +1,31 @@
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse,HTMLResponse
-import uvicorn
+# Standard library imports
+import io
+import threading
+from time import sleep, time
+
+# Third-party imports
 import cv2
-import rclpy
+import numpy as np
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, StreamingResponse
+from geometry_msgs.msg import Point, Pose, Quaternion
+from builtin_interfaces.msg import Time
 from picamera2 import Picamera2
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-import io
-from time import sleep, time
-import asyncio
-from rclpy.executors import MultiThreadedExecutor
-import threading
-import numpy as np
 
+# Local application imports
 from .utils import draw_center_frame
 from aruco_detection.aruco_detection import find_aruco_marker
-
+from custom_interfaces.msg import ArucoMsg
 
 
 class ArucoDectectionNode(Node):
     def __init__(self):
         super().__init__('aruco_detection')
-        
         # Aruco Detection Parameters 
         # ArUco marker parameters
         self.ARUCO_DICT_TYPE = cv2.aruco.DICT_5X5_1000
@@ -42,6 +45,14 @@ class ArucoDectectionNode(Node):
             self.listener_callback,
             10
         )
+        
+        # Create a subscription to send the marker data
+        self.aruco_pub = self.create_publisher(
+            msg_type = ArucoMsg,
+            topic="/aruco_detection",
+            qos_profile=1)
+        
+        self.start_time = time()
         
     def listener_callback(self, msg):
         try:
@@ -63,23 +74,29 @@ class ArucoDectectionNode(Node):
                     if marker_array:
                         self.get_logger().info("Found Marker Doing Detection")
                         for marker, marker_id in marker_array:
-                            # transformation_matrix = track_and_render_marker(
-                            #         frame,
-                            #         marker,
-                            #         marker_id,
-                            #         camera_matrix=stream_instace.camera_matrix,
-                            #         distortion_coefficient=stream_instace.camera_dist,
-                            #         marker_length=MARKER_LENGTH
-                            #     )
-                            # # Optionally compute an offset point transformation if tracking a point
-                            # if TRACK_POINT:
-                            #     T0point = transformation_matrix @ marker_point
-                            #     tvec = T0point[:-1, -1]
-                            # else:
-                            #     tvec = transformation_matrix[:-1, -1]
-                                
-                            # x, y, z = tvec
                             self.get_logger().info("Processing Markers")
+                            # Intialize
+                            aruco_data = ArucoMsg()
+                            aruco_data.id = marker_id
+                            
+                            # Get the Pose
+                            aruco_data.pose = Pose()
+                            aruco_data.pose.position = Point(x=1.0, y=0.0, z=2.0)
+                            aruco_data.pose.orientation = Quaternion(x=0.1, y=0.1, z=0.3, w=1.0)
+                            # Get the time
+                            current_time = time.time()
+                            elapsed_time = current_time - self.start_time
+                            aruco_data.detection_time = Time()
+                            aruco_data.detection_time.sec = int(elapsed_time)
+                            aruco_data.detection_time.nanosec = int((elapsed_time - int(elapsed_time)) * 1e9)
+                            
+                            aruco_data.size = self.MARKER_LENGTH
+
+                            # Set the dictionary type
+                            aruco_data.dictionary_type = str(self.ARUCO_DICT_TYPE)
+
+                            # Publish the message
+                            self.publisher_.publish(aruco_data)
 
                         
         except Exception as e:

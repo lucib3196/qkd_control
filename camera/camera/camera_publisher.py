@@ -35,7 +35,9 @@ class CameraPublisher(Node):
         self.get_logger().info("Initialized the Camera Node")
         
         
+    # Call Back Function that will handle the publishing of the images
     def timer_callback(self):
+        
         self.picam2.start()
         buffers, metadata = self.picam2.capture_buffers(["main"])
         buffer = buffers[0]

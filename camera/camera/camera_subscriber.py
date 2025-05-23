@@ -16,8 +16,6 @@ import numpy as np
 
 from .utils import draw_center_frame
 
-
-
 class CameraSubscriber(Node):
     def __init__(self):
         super().__init__('camera_subscriber')
