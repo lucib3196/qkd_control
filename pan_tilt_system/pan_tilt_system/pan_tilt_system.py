@@ -4,6 +4,7 @@ from rclpy.executors import MultiThreadedExecutor  # type: ignore
 from sensor_msgs.msg import JointState  # type: ignore
 from std_msgs.msg import Header, Int32, String, Float32  # type: ignore
 import math
+from custom_interfaces.msg import PanTiltMsg, ArucoMsg
 from enum import Enum
 import time
 import threading
@@ -20,6 +21,7 @@ class PanTiltMode(Enum):
     IDLE = "idle"
     TRACK = "track"
     SCOUT = "scout"
+    MANUaL ="manual"
 
 
 class PanTiltSystem(Node):
@@ -30,14 +32,7 @@ class PanTiltSystem(Node):
 
         self.get_logger().info("Setting up Pan and Tilt System")
 
-        # Create a publisher to publish the angles of the pan and tilt system
-        self.angle_pub = self.create_publisher(
-            msg_type=JointState, topic="/pan_tilt_angles", qos_profile=10
-        )
-        timer_period = 0.1  # seconds
-        self.timer = self.create_timer(timer_period, self.timer_callback)
-
-        # Initialize servos
+        # Servo Configuration
         self.servos = {
             "pan": {
                 "gpio": 17,
@@ -57,14 +52,33 @@ class PanTiltSystem(Node):
             },
         }
         self.initialize_servos()
-
+        
+    
         # Define the mode of the system
         self.running = True
-        self.mode = PanTiltMode.SCOUT
+        self.mode = PanTiltMode.TRACK
         self.mode_lock = threading.Lock()
         self.mode_thread = threading.Thread(target=self.handle_mode)
         self.mode_thread.start()
-
+        
+        ## Section for services and subscriptios
+        # Create a publisher to publish the angles of the pan and tilt system
+        self.angle_pub = self.create_publisher(
+            msg_type=PanTiltMsg, topic="/pan_tilt_angles", qos_profile=10
+        )
+        timer_period = 0.1  # seconds
+        self.angle_timer = self.create_timer(timer_period, self.angle_callback)
+        
+        # Main Subscription will get the aruco marker data for angle adjustments
+        self.last_marker_position_time = None # This will be updated as the tracking goes
+        self.create_subscription(
+            ArucoMsg,
+            "/aruco_data",
+            self.pid_control, 
+            10
+        )
+        
+        ### Additional Subscriptions not yet complete
         # Create subscriptions
         self.create_subscription(
             Int32,
@@ -79,18 +93,6 @@ class PanTiltSystem(Node):
             10,
         )
         self.create_subscription(String, "/pan_tilt_mode", self.mode_callback, 10)
-        self.create_subscription(
-            Float32,
-            "/error/pan",
-            lambda msg: self.pid_control(servo_name="pan", error=msg.data),
-            10,
-        )
-        self.create_subscription(
-            Float32,
-            "/error/tilt",
-            lambda msg: self.pid_control(servo_name="tilt", error=msg.data),
-            10,
-        )
 
     def initialize_servos(self):
         for name, config in self.servos.items():
@@ -126,23 +128,13 @@ class PanTiltSystem(Node):
                 )
         return self
 
-    def timer_callback(self):
-        """Method that is periodically called by the timer."""
-        joint_state = JointState()
-        joint_state.header = Header()
-        joint_state.header.stamp = self.get_clock().now().to_msg()
-        joint_state.name = ["pan_joint", "tilt_joint"]
+    def angle_callback(self):
+        """Method that is periodically called by the timer, to publish the angles of the servos"""
+        pantilt_angles = PanTiltMsg()
+        pantilt_angles.pan_angle=self.servos["pan"].get("angle")
+        pantilt_angles.tilt_angle=self.servos["tilt"].get("angle"),
+        self.angle_pub.publish(pantilt_angles)
 
-        joint_state.position = [
-            self.servos["pan"].get("angle"),
-            self.servos["tilt"].get("angle"),
-        ]
-
-        # Explicitly define that these values are empty
-        joint_state.velocity = []
-        joint_state.effort = []
-
-        self.angle_pub.publish(joint_state)
 
     def update_servo(self, servo_name: str, angle: float):
         if servo_name in self.servos and self.servos[servo_name]["servo"]:
@@ -151,33 +143,52 @@ class PanTiltSystem(Node):
             self.servos[servo_name]["angle"] = angle
         else:
             self.get_logger().warn(f"Servo {servo_name} not found or not initialized")
-
-    def pid_control(self, servo_name: str, error: float):
+    
+    def pid_control(self,msg:ArucoMsg):
         with self.mode_lock:
             if self.mode != PanTiltMode.TRACK:
                 return  # Exit the callback if not in TRACK mode
-
-        self.get_logger().info("Error Detected Updating")
-        self.get_logger().info(
-            f"""
-            Servo: {servo_name} Current Error: {error}
-            """
-        )
+        self.get_logger().info("Got ArucoData Need to Update Position")
+        
+        x = msg.pose.position.x
+        y=msg.pose.position.y
+        z=msg.pose.position.z
+        detection_time = msg.detection_time.sec
+        detection_time_nano = msg.detection_time.nanosec
+        
+        # Apply the pid control
+        pan_error = np.degrees(np.arctan2(x, z))
+        tilt_error = np.degrees(np.arctan(y,z))
+        
+        if self.last_marker_position_time:
+            elapsed_time = detection_time_nano-self.last_marker_position_time
+        else:
+            elapsed_time = detection_time_nano
+        
+        self.pid_control_angle('pan',pan_error,elapsed_time)
+        self.pid_control_angle('tilt',tilt_error,elapsed_time)
+        
+        self.last_marker_position_time = detection_time_nano
+        
+    def pid_control_angle(self, servo_name:str, error:float, elapsed_time:float):
+        "Helper function meant to just calculate error, adjust the angles and clipd"
+        with self.mode_lock:
+            if self.mode != PanTiltMode.TRACK:
+                return  # Exit the callback if not in TRACK mode
         current_angle = self.servos[servo_name].get('angle', 0)
-        correction = self.servos[servo_name]['controller'].compute(error, 0.1)
+        correction = self.servos[servo_name]['controller'].compute(error, elapsed_time)
         new_angle = np.clip(
             current_angle - correction,
             self.servos[servo_name]['angle_range'][0],
             self.servos[servo_name]['angle_range'][1]
         )
-        
         self.get_logger().info(
             f"""
             Servo: {servo_name} New Angle: {new_angle}
             """
         )
         self.update_servo(servo_name, new_angle)
-
+        
 
     def mode_callback(self, msg):
         new_mode = msg.data.lower().strip()

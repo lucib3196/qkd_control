@@ -17,6 +17,7 @@ find_package(rosidl_default_generators REQUIRED)
 set(interface_files
   # Messages
   "msg/ArucoMsg.msg"
+  "msg/PanTiltMsg.msg"
 
 )
 

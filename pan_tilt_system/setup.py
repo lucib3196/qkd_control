@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = "PanTiltSystem"
+package_name = "pan_tilt_system"
 
 setup(
     name=package_name,
@@ -19,9 +19,9 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "pan_tilt_system = PanTiltSystem.pan_tilt_system:main",
-            "camera=PanTiltSystem.camera_system:main",
-            "arduino_bridge=PanTiltSystem.arduino_bridge:main"
+            "pan_tilt_system = pan_tilt_system.pan_tilt_system:main",
+            "camera=pan_tilt_system.camera_system:main",
+            "arduino_bridge=pan_tilt_system.arduino_bridge:main"
         ],
     },
 )
