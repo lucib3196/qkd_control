@@ -14,7 +14,9 @@ import numpy as np
 from gpiozero import Device, AngularServo
 from gpiozero.pins.pigpio import PiGPIOFactory
 
-Device.pin_factory = PiGPIOFactory()
+# Device.pin_factory = PiGPIOFactory
+print(Device.pin_factory)
+
 
 
 class PanTiltMode(Enum):
@@ -56,7 +58,7 @@ class PanTiltSystem(Node):
     
         # Define the mode of the system
         self.running = True
-        self.mode = PanTiltMode.TRACK
+        self.mode = PanTiltMode.SCOUT
         self.mode_lock = threading.Lock()
         self.mode_thread = threading.Thread(target=self.handle_mode)
         self.mode_thread.start()
@@ -129,11 +131,13 @@ class PanTiltSystem(Node):
         return self
 
     def angle_callback(self):
-        """Method that is periodically called by the timer, to publish the angles of the servos"""
-        pantilt_angles = PanTiltMsg()
-        pantilt_angles.pan_angle=self.servos["pan"].get("angle")
-        pantilt_angles.tilt_angle=self.servos["tilt"].get("angle"),
-        self.angle_pub.publish(pantilt_angles)
+        msg = PanTiltMsg()
+        # Ensure both angles are floats
+        msg.pan_angle = float(self.servos["pan"]["angle"])
+        msg.tilt_angle = float(self.servos["tilt"]["angle"])
+        self.angle_pub.publish(msg)
+        self.get_logger().info(f"Published pan: {msg.pan_angle}, tilt: {msg.tilt_angle}")
+
 
 
     def update_servo(self, servo_name: str, angle: float):

@@ -36,7 +36,7 @@ def create_folder(folder_path):
 def calibrate_camera(image_path, calib_output_folder):
     # Define calibration criteria and checkerboard size
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-    num_squares_width = 8
+    num_squares_width = 9
     num_squares_height = 7
 
     # Prepare object points (3D real-world coordinates)
@@ -90,8 +90,10 @@ def calibrate_camera(image_path, calib_output_folder):
                 cv.imwrite(os.path.join(failure_folder, fname), img)
                 failure_count += 1
 
+    from typing import Any
+
     # Create a summary dictionary
-    summary = {
+    summary: dict[str, Any] = {
         "total_images": total_images,
         "success_count": success_count,
         "failure_count": failure_count,

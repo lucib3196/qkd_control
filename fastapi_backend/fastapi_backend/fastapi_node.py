@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from std_msgs.msg import String
 import requests
 import threading
-from custom_interfaces.msg import ArucoMsg
+from custom_interfaces.msg import PanTiltMsg, ArucoMsg
 from typing import Literal
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,6 +71,16 @@ class PydanticArucoMsg(BaseModel):
             dictionary_type=msg.dictionary_type
         )
         
+class PydanticServoAngles(BaseModel):
+    pan_angle:float
+    tilt_angle:float
+
+    @classmethod
+    def from_ros_msg(cls,msg):
+        return cls(
+            pan_angle=msg.pan_angle,
+            tilt_angle=msg.tilt_angle
+        )
 
 @app.post("/endpoint")
 async def receive_data(data: Message):
@@ -86,9 +96,26 @@ async def aruco_data(data:PydanticArucoMsg):
     print("Received ArUco data:", data.model_dump())  # Add this
     return {'message': "Data Received"}
 
-@app.get("/arucodata", response_model=Optional[PydanticArucoMsg])
+@app.get("/pantiltangle", response_model=Optional[PydanticArucoMsg])
 async def get_latest_arucodata():
     return latest_arucodata
+
+# In memory 
+latest_pantiltangle: Optional[PydanticServoAngles]=None
+@app.post("/pantiltangle")
+async def aruco_data(data:PydanticServoAngles):
+    global latest_pantiltangle
+    latest_pantiltangle = data
+    print("Received PanTiltAngles data:", data.model_dump())  # Add this
+    return {'message': "Data Received"}
+
+@app.get("/pantiltangle", response_model=Optional[PydanticServoAngles])
+async def get_latest_arucodata():
+    return latest_pantiltangle
+
+
+
+
 
 class FastAPINode(Node):
     def __init__(self):
@@ -97,7 +124,10 @@ class FastAPINode(Node):
         self.publisher_ = self.create_publisher(String, 'web_service_topic', 10)
         timer_period = 1.0  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
+
+        # Subscription to data we want
         self.aruco_sub = self.create_subscription(msg_type=ArucoMsg, topic="/aruco_data", callback=self.aruco_callback,qos_profile=1)
+        self.pantilt_sub = self.create_subscription(msg_type=PanTiltMsg, topic="/pan_tilt_angles", callback=self.pantilt_callback,qos_profile=1)
         
     def aruco_callback(self,msg: ArucoMsg):
         data = PydanticArucoMsg.from_ros_msg(msg)
@@ -106,6 +136,18 @@ class FastAPINode(Node):
         
     def publish_arucodata(self,data:PydanticArucoMsg):
         url = "http://localhost:8000/arucodata"
+        payload = data.model_dump()
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            self.get_logger().error('Failed to publish to FastAPI endpoint: %s')
+
+    def pantilt_callback(self,msg: PanTiltMsg):
+        data = PydanticServoAngles.from_ros_msg(msg)
+        self.get_logger().info('Published message: "%s"' % data)
+        self.publish_pantilt(data)
+        
+    def publish_pantilt(self,data:PydanticServoAngles):
+        url = "http://localhost:8000/pantiltangle"
         payload = data.model_dump()
         response = requests.post(url, json=payload)
         if response.status_code != 200:

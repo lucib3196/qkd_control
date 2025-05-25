@@ -1,3 +1,4 @@
+import cv2
 
 def draw_square_frame(image_frame, coordinates):
     try:

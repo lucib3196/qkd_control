@@ -4,6 +4,7 @@ import time
 import argparse
 from pathlib import Path
 from datetime import datetime
+from libcamera import controls # type: ignore
 
 try:
     from picamera2 import Picamera2
@@ -26,13 +27,13 @@ def parse_args():
         "--img_size",
         nargs=2,
         type=int,
-        default=[1280, 720],
+        default=[1536, 864],
         help="Image resolution as two integers: width height."
     )
     parser.add_argument(
         "--delay",
         type=int,
-        default=3,
+        default=2,
         help="Delay in seconds before starting the camera (PiCamera only)."
     )
     return parser.parse_args()
@@ -115,9 +116,11 @@ def main():
         config = picam2.create_video_configuration(
             main={"size": (img_width, img_height), "format": 'XBGR8888'}
         )
+        config["controls"] = {"AfMode": 1} 
         picam2.configure(config)
         picam2.start()
         time.sleep(args.delay)  # Allow camera to adjust
+        picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous})
 
         print("Press 'c' to capture an image, 'q' to quit.")
         while True:

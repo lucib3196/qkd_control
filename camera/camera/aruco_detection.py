@@ -1,122 +1,193 @@
-# Standard library imports
-import io
+# ───── Standard Library ─────
+from time import time
 import threading
-from time import sleep, time
+from collections import deque
 
-# Third-party imports
+# ───── Third-Party Libraries ─────
 import cv2
 import numpy as np
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
-from geometry_msgs.msg import Point, Pose, Quaternion
-from builtin_interfaces.msg import Time
-from picamera2 import Picamera2
-from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
+from geometry_msgs.msg import Point, Pose, Quaternion  # type: ignore
+from builtin_interfaces.msg import Time  # type: ignore
+from rclpy.node import Node  # type: ignore
+from sensor_msgs.msg import CompressedImage  # type: ignore
+from cv_bridge import CvBridge  # type: ignore
+import rclpy  # type: ignore
+from rclpy.qos import qos_profile_sensor_data  # type: ignore
+from concurrent.futures import ThreadPoolExecutor
 
-# Local application imports
+# ───── Local Modules ─────
 from .utils import draw_center_frame
-from aruco_detection.aruco_detection import find_aruco_marker
-from custom_interfaces.msg import ArucoMsg
+from aruco_detection.aruco_detection import find_aruco_marker, track_and_render_marker  # type: ignore
+from custom_interfaces.msg import ArucoMsg  # type: ignore
+from .camera_settings import ArucoParameters, calibrated_camera
+from .utils.camera_calibration_utils import CalibratedCamera
 
 
 class ArucoDectectionNode(Node):
-    def __init__(self):
+    def __init__(self, aruco_params: ArucoParameters, calibrated_camera: CalibratedCamera, max_queue: int = 5, target_fps: float = 10):
         super().__init__('aruco_detection')
-        # Aruco Detection Parameters 
-        # ArUco marker parameters
-        self.ARUCO_DICT_TYPE = cv2.aruco.DICT_5X5_1000
-        self.MARKER_LENGTH = 0.033 # meters
-        self.MARKER_ID = 5     # ID of the marker to track
-        self.TRACK_POINT = False # Whether to track an offset point
-        self.marker_point = np.array([0.1, 0, 0, 1]).reshape(4, 1)  # Offset of the point to track in meters
-        
-        
-        # Intialize the CV Bridge
+
+        self.aruco_params = aruco_params
+        self.calibrated_camera = calibrated_camera
         self.bridge = CvBridge()
-        # Intialize the subscribtion to the image
         self.frame_buffer = None
+        self.frame_queue = deque(maxlen=max_queue)
+        self.start_time = time()
+        self.shutdown_flag = False
+        self.lock = threading.Lock()
+        self.thread_pool = ThreadPoolExecutor(max_workers=4)
+
+        # ROS 2 image subscription
         self.subscription = self.create_subscription(
-            Image,
+            CompressedImage,
             '/pan_tilt_images/image_raw',
             self.listener_callback,
-            10
+            qos_profile=qos_profile_sensor_data
         )
-        
-        # Create a subscription to send the marker data
-        self.aruco_pub = self.create_publisher(
-            msg_type = ArucoMsg,
-            topic="/aruco_detection",
-            qos_profile=1)
-        
-        self.start_time = time()
-        
-    def listener_callback(self, msg):
+
+        # ROS 2 marker publisher
+        self.publisher_ = self.create_publisher(
+            ArucoMsg,
+            "/aruco_detection",
+            qos_profile=10
+        )
+        self.proccess_image_pub = self.create_publisher(
+            CompressedImage,
+            "/pan_tilt_images/processed",
+            qos_profile=10
+        )
+
+    def listener_callback(self, msg: CompressedImage):
+        if self.shutdown_flag:
+            return
+
         try:
-            self.get_logger().info(f'Received an Image')
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            # Convert to image to process this may be redundant need to check
-            ret, jpeg = cv2.imencode('.jpg', cv_image)
-            if ret:
-                self.frame_buffer = jpeg.tobytes()
-                if self.frame_buffer is not None:
-                    nparr = np.frombuffer(self.frame_buffer, dtype=np.uint8)
-                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                    draw_center_frame(frame, (480,480))
-                    
-                    # Marker detection using the predefined ArUco dictionary
-                    aruco_dict = cv2.aruco.getPredefinedDictionary(self.ARUCO_DICT_TYPE)
-                    parameters = cv2.aruco.DetectorParameters()
-                    marker_array = find_aruco_marker(frame, aruco_dict, parameters)
-                    if marker_array:
-                        self.get_logger().info("Found Marker Doing Detection")
-                        for marker, marker_id in marker_array:
-                            self.get_logger().info("Processing Markers")
-                            # Intialize
-                            aruco_data = ArucoMsg()
-                            aruco_data.id = marker_id
-                            
-                            # Get the Pose
-                            aruco_data.pose = Pose()
-                            aruco_data.pose.position = Point(x=1.0, y=0.0, z=2.0)
-                            aruco_data.pose.orientation = Quaternion(x=0.1, y=0.1, z=0.3, w=1.0)
-                            # Get the time
-                            current_time = time.time()
-                            elapsed_time = current_time - self.start_time
-                            aruco_data.detection_time = Time()
-                            aruco_data.detection_time.sec = int(elapsed_time)
-                            aruco_data.detection_time.nanosec = int((elapsed_time - int(elapsed_time)) * 1e9)
-                            
-                            aruco_data.size = self.MARKER_LENGTH
+            self.get_logger().info("📷 Received image message.")
 
-                            # Set the dictionary type
-                            aruco_data.dictionary_type = str(self.ARUCO_DICT_TYPE)
+            # Safely decode the compressed image
+            cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-                            # Publish the message
-                            self.publisher_.publish(aruco_data)
+            # Validate image shape before proceeding
+            if cv_image is None:
+                self.get_logger().warn("⚠️ cv_image is None after conversion.")
+                return
 
-                        
+            if len(cv_image.shape) != 3 or cv_image.shape[0] == 0 or cv_image.shape[1] == 0:
+                self.get_logger().warn(f"⚠️ Invalid image shape: {cv_image.shape}")
+                return
+
+            # Submit to thread pool
+            self.thread_pool.submit(self._process_frame, cv_image)
+
         except Exception as e:
-            self.get_logger().warn(f"Error {e}")
-                    
+            self.get_logger().warn(f"❌ Error converting image: {e}")
+
+
+    def _process_frame(self, cv_image):
+        # self.get_logger().info("Processing Image")
+        try:
+            if cv_image is None or len(cv_image.shape) != 3:
+                self.get_logger().warn("Invalid or empty cv_image.")
             
+
+            h, w = cv_image.shape[:2]
+            draw_center_frame(cv_image, (int(w / 2), int(h / 2)))
+
+            # Marker Detection and intiliaziatiuon
+            default_dict = cv2.aruco.DICT_5X5_1000
+            dict_id = getattr(cv2.aruco, self.aruco_params.aruco_dict_type, default_dict)
+            if self.aruco_params.aruco_dict_type is None:
+                self.get_logger().warn(f"Could not initialize the given aruco dict type it is either none or other: {self.aruco_params.aruco_dict_type} will default to {default_dict}")
+
+            aruco_dict = cv2.aruco.getPredefinedDictionary(dict_id)
+            parameters = cv2.aruco.DetectorParameters()
+            marker_array = find_aruco_marker(cv_image, aruco_dict, parameters)
+
+            if marker_array:
+                self.get_logger().info("Found marker(s), starting detection.")
+
+                for marker, marker_id in marker_array:
+                    self.get_logger().info(f"Processing marker ID: {marker_id}")
+                    transformation_matrix = track_and_render_marker(
+                        cv_image,
+                        marker,
+                        marker_id,
+                        camera_matrix=self.calibrated_camera.camera_matrix,
+                        distortion_coefficient=self.calibrated_camera.camera_dist,
+                        marker_length=self.aruco_params.marker_length
+                    )
+                    
+
+                    if transformation_matrix is None:
+                        self.get_logger().warn("⚠️ Failed to compute transformation matrix.")
+
+                    if self.aruco_params.track_point:
+                        T0point = transformation_matrix @ self.aruco_params.marker_point
+                        if T0point.shape[0] >= 3:
+                            tvec = T0point[:3, -1].flatten()
+                        else:
+                            self.get_logger().warn("Invalid transformation matrix for track point.")
+
+                    else:
+                        tvec = transformation_matrix[:3, -1].flatten()
+
+                    if len(tvec) != 3:
+                        self.get_logger().warn("⚠️ Invalid translation vector.")
+
+                    x, y, z = tvec
+
+                    
+
+                    # Send the message for aruco data
+                    msg = ArucoMsg()
+                    msg.id = int(marker_id)
+                    msg.pose = Pose(
+                        position=Point(x=x, y=y, z=z),
+                        orientation=Quaternion(x=0.1, y=0.1, z=0.3, w=1.0)  # Replace with real orientation if available
+                    )
+
+
+                    elapsed_time = time() - self.start_time
+                    msg.detection_time = Time(
+                        sec=int(elapsed_time),
+                        nanosec=int((elapsed_time - int(elapsed_time)) * 1e9)
+                    )
+
+                    msg.size = self.aruco_params.marker_length
+                    msg.dictionary_type = self.aruco_params.aruco_dict_type
+                    
+                    self.publisher_.publish(msg)
+                   
+            # Will send the frame back
+            ros_image =  self.bridge.cv2_to_compressed_imgmsg(
+                cv_image,
+                dst_format='jpg'               # <-- use 'jpg' or 'jpeg'
+                )
+            # Publish the processed image
+            ros_image.header.stamp = self.get_clock().now().to_msg()
+            ros_image.header.frame_id = 'camera'
+            self.proccess_image_pub.publish(ros_image)
+
+        except Exception as e:
+            self.get_logger().warn(f"Error during frame processing: {e}")
+
+
 def main(args=None):
-    """
-    The main function.
-    :param args: Not used directly by the user, but used by ROS2 to configure
-    certain aspects of the Node.
-    """
+    node =None
     try:
         rclpy.init(args=args)
-        aruco_detector = ArucoDectectionNode()
-        rclpy.spin(aruco_detector)
+        aruco_params = ArucoParameters()
+        node = ArucoDectectionNode(aruco_params, calibrated_camera=calibrated_camera)
+        rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(e)
+        print(f"Exception in main: {e}")
+    finally:
+        if node is not None:
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+import cv2
 
 def draw_aruco_id(frame, coor, marker_id):
     """
