@@ -18,6 +18,7 @@ set(interface_files
   # Messages
   "msg/ArucoMsg.msg"
   "msg/PanTiltMsg.msg"
+  "msg/PanTiltError.msg"
 
 )
 
