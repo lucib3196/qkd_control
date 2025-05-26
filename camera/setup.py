@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'camera_pub=camera.camera_publisher:main',
+            'camera_pub = camera.camera_publisher:main',
             'camera_sub=camera.camera_subscriber:main',
             'aruco_detector=camera.aruco_detection:main'
         ],

@@ -20,9 +20,6 @@ from sensor_msgs.msg import CompressedImage  # type: ignore
 from .utils.camera_calibration_utils import CalibratedCamera
 from .camera_settings import calibrated_camera, camera_config
 
-
-
-
 class CameraPublisher(Node):
     def __init__(
         self,

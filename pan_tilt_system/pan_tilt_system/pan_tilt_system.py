@@ -58,7 +58,7 @@ class PanTiltSystem(Node):
     
         # Define the mode of the system
         self.running = True
-        self.mode = PanTiltMode.SCOUT
+        self.mode = PanTiltMode.TRACK
         self.mode_lock = threading.Lock()
         self.mode_thread = threading.Thread(target=self.handle_mode)
         self.mode_thread.start()
