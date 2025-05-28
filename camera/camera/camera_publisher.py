@@ -8,7 +8,7 @@ import cv2
 from picamera2 import Picamera2
 from libcamera import controls  # type: ignore
 from cv_bridge import CvBridge  # type: ignore
-
+from rclpy.logging import LoggingSeverity
 # ───────────────────────────────────────────────────────────────
 # 🤖 ROS 2
 import rclpy  # type: ignore
@@ -19,9 +19,6 @@ from sensor_msgs.msg import CompressedImage  # type: ignore
 # 🧠 Local Modules
 from .utils.camera_calibration_utils import CalibratedCamera
 from .camera_settings import calibrated_camera, camera_config
-
-
-
 
 class CameraPublisher(Node):
     def __init__(
@@ -38,6 +35,8 @@ class CameraPublisher(Node):
         self.width = calibrated_camera.frame_width
         self.height = calibrated_camera.frame_height
         self.framerate = framerate
+        
+        self.get_logger().set_level(LoggingSeverity.WARN)
 
         # Calibration data (for undistort later)
         self.calibrated_camera = calibrated_camera

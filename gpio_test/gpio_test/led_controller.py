@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from gpiozero import LED
+from gpiozero import LED # type: ignore
 from time import sleep
 from std_msgs.msg import Bool
 

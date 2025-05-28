@@ -4,8 +4,8 @@ import threading
 from collections import deque
 
 # ───── Third-Party Libraries ─────
-import cv2
-import numpy as np
+import cv2 # type: ignore
+import numpy as np # type: ignore
 from geometry_msgs.msg import Point, Pose, Quaternion  # type: ignore
 from builtin_interfaces.msg import Time  # type: ignore
 from rclpy.node import Node  # type: ignore
@@ -17,11 +17,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 # ───── Local Modules ─────
 from .utils import draw_center_frame
-from aruco_detection.aruco_detection import find_aruco_marker, track_and_render_marker  # type: ignore
+from aruco_detection.aruco_detection_utils import find_aruco_marker, track_and_render_marker  # type: ignore
 from custom_interfaces.msg import ArucoMsg  # type: ignore
 from .camera_settings import ArucoParameters, calibrated_camera
 from .utils.camera_calibration_utils import CalibratedCamera
-
+from rclpy.logging import LoggingSeverity
 
 class ArucoDectectionNode(Node):
     def __init__(self, aruco_params: ArucoParameters, calibrated_camera: CalibratedCamera, max_queue: int = 5, target_fps: float = 10):
@@ -36,6 +36,8 @@ class ArucoDectectionNode(Node):
         self.shutdown_flag = False
         self.lock = threading.Lock()
         self.thread_pool = ThreadPoolExecutor(max_workers=4)
+        
+        self.get_logger().set_level(LoggingSeverity.WARN)
 
         # ROS 2 image subscription
         self.subscription = self.create_subscription(
@@ -145,7 +147,6 @@ class ArucoDectectionNode(Node):
                         position=Point(x=x, y=y, z=z),
                         orientation=Quaternion(x=0.1, y=0.1, z=0.3, w=1.0)  # Replace with real orientation if available
                     )
-
 
                     elapsed_time = time() - self.start_time
                     msg.detection_time = Time(
