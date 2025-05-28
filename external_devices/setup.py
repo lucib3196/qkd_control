@@ -1,11 +1,11 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
-package_name = 'fastapi_backend'
+package_name = 'external_devices'
 
 setup(
     name=package_name,
     version='0.0.0',
-    packages=[package_name],
+    packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -20,7 +20,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'backend=fastapi_backend.backend:main'
+            'arduino_test = external_devices.arduino_test:main',
+            'arduino_bridge = external_devices.arduino_bridge:main',
+            'arduino_bridge_v2 = external_devices.arduino_bridge_v2:main'
         ],
     },
 )

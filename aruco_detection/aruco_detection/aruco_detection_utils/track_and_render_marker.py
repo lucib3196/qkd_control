@@ -46,7 +46,7 @@ def estimatePoseAndTransformation(marker, camera_matrix, distortion_coeff, marke
     # Estimate pose of the marker and get the transformation matrix
     rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(marker, marker_length, camera_matrix, distortion_coeff)
     R, _ = cv2.Rodrigues(rvec)
-    print(f"This is the marker length{marker_length}")
+    # print(f"This is the marker length{marker_length}")
     transformation_matrix = np.hstack((R, tvec[0].T))
     transformation_matrix = np.vstack((transformation_matrix, np.array([0, 0, 0, 1])))
 
@@ -72,12 +72,12 @@ def track_and_render_marker(frame, marker, marker_id, camera_matrix, distortion_
         marker_length (float): The physical length of the marker in meters.
     """
     try:
-        print("Inside marker renderer")
+        # print("Inside marker renderer")
         marker_coordinates = get_corner_and_center(marker)
         transformation_matrix, distance, rvec, tvec = estimatePoseAndTransformation(
             marker, camera_matrix, distortion_coefficient, marker_length
         )
-        print("Success")
+        # print("Success")
         draw_square_frame(frame, marker_coordinates)
         draw_aruco_id(frame, marker_coordinates, marker_id)
         display_distance_marker(frame,marker_id,distance)

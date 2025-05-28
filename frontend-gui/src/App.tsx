@@ -50,17 +50,22 @@ const ArucoSection: React.FC = () => {
 
   const getArucoData = async () => {
     try {
-      const res = await api.get<ArucoMsg>("http://localhost:8000/arucodata");
+      const res = await api.post("/aruco_detection");
       setArucoData(res.data);
+      console.log(res.data)
     } catch (err) {
       console.error("Failed to fetch Aruco data:", err);
-      setArucoData(mockArucoData);
     }
   };
 
   useEffect(() => {
     getArucoData();
   }, []);
+
+  useEffect(()=>{
+    if (!ArucoData) return
+
+  }, [ArucoData])
 
   const handleArucoData = () => {
     if (!ArucoData) {
@@ -161,7 +166,11 @@ const CameraView: React.FC = () => {
   return (
     <div className="border-gray-200 rounded-2xl w-full h-full bg-red-500 flex flex-col">
       <div className="h-9/10 w-full border border-black rounded-2xl mx-2 my-1">
-        Camera Feed
+        <img
+          src="http://localhost:8000/video_feed"
+          alt="Live video stream"
+          style={{ maxWidth: "100%", height: "auto" }}
+        />
       </div>
       <h1 className="text-2xl text-center my-3  ">Pan and Tilt Feed</h1>
     </div>
