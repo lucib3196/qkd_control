@@ -19,6 +19,7 @@ set(interface_files
   "msg/ArucoMsg.msg"
   "msg/PanTiltMsg.msg"
   "msg/PanTiltError.msg"
+  "msg/HalfWavePlate.msg"
 
 )
 
